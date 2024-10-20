@@ -38,6 +38,7 @@ blibs.init_root_logger()
 logger = logging.getLogger(__name__)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
 logging.getLogger("msrest").setLevel(logging.ERROR)
+logging.getLogger("msal").setLevel(logging.ERROR)
 
 
 @asynccontextmanager
@@ -249,14 +250,74 @@ class MessageIdAndMessageOfAnyType(BaseModel):
     @model_validator(mode="after")
     def check_that_only_one_message_type_is_filled(self) -> Self:
         if sum([0 if x is None else 1 for x in [self.message, self.text, self.card]]) != 1:
-            raise ValueError("One and only one of message, text, or card must be filled")
+            raise ValueError("one and only one of message, text, or card must be filled")
         return self
 
 
 @app.patch("/api/v1/message")
 async def send_notification(
     msg_to_patch: Annotated[MessageIdAndMessageOfAnyType, Body()],
-): ...
+):
+    connection: asyncpg.pool.PoolConnectionProxy
+    async with await database.acquire() as connection:
+        activity_details = await connection.fetchrow(
+            """
+            SELECT  conversation_teams_id,
+                    activity_id,
+                    deleted_at
+            FROM message
+            JOIN conversation_reference cr USING (conversation_reference_id)
+            WHERE message_id = $1
+            """,
+            msg_to_patch.message_id,
+        )
+        if activity_details is None:
+            raise HTTPException(
+                status_code=400,
+                detail="invalid message_id",
+            )
+
+        if activity_details["deleted_at"] is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="message deleted, can't be updated",
+            )
+
+        payload = msg_to_patch.message or msg_to_patch.text or msg_to_patch.card
+        built_card = None
+        if isinstance(payload, str):
+            built_card = cards.simple_message(payload)
+        elif isinstance(payload, TextMessage):
+            built_card = cards.simple_message(payload.text, payload.title, payload.title_color)
+        elif isinstance(payload, dict):
+            built_card = cards.card(payload)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="invalid payload, neither a text, a message nor a card",
+            )
+
+        await ti.update_activity(
+            conversation_teams_id=activity_details["conversation_teams_id"],
+            activity_id=activity_details["activity_id"],
+            activity=built_card,
+        )
+
+        result = await connection.fetchrow(
+            """
+            UPDATE message SET updated_at = NOW()
+            WHERE message_id = $1 RETURNING message_id, updated_at
+            """,
+            msg_to_patch.message_id,
+        )
+
+    return JSONResponse(
+        status_code=status.HTTP_201_CREATED,
+        content={
+            "message_id": str(result["message_id"]),
+            "updated_at": str(result["updated_at"]),
+        },
+    )
 
 
 if __name__ == "__main__":

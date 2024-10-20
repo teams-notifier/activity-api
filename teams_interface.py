@@ -4,10 +4,12 @@ from botbuilder.schema import ActivityTypes
 from botbuilder.schema import ChannelAccount
 from botframework.connector.aio import ConnectorClient
 from botframework.connector.auth import MicrosoftAppCredentials
+from opentelemetry import trace
 
 from config import DefaultConfig
 
 config = DefaultConfig()
+tracer = trace.get_tracer(__name__)
 
 SERVICE_URL = "https://smba.trafficmanager.net/amer/"
 CHANNEL_ID = "msteams"
@@ -33,6 +35,7 @@ class TeamsInterface:
             text=activity,
         )
 
+    @tracer.start_as_current_span("send_to_conversation")
     async def send_to_conversation(
         self,
         conversation_teams_id: str,
@@ -44,6 +47,7 @@ class TeamsInterface:
         )
         return result.id  # type: ignore
 
+    @tracer.start_as_current_span("update_activity")
     async def update_activity(
         self,
         conversation_teams_id: str,
@@ -57,6 +61,7 @@ class TeamsInterface:
         )
         return res.id  # type: ignore
 
+    @tracer.start_as_current_span("delete_activity")
     async def delete_activity(
         self,
         conversation_teams_id: str,
