@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI):
 
 
 app: FastAPI = FastAPI(
+    title="Teams Notifier activity-api",
     lifespan=lifespan,
     middleware=[
         Middleware(
@@ -90,11 +91,7 @@ class TextMessage(BaseModel):
     )
 
 
-class CardNotification(BaseModel):
-    card: dict[str, Any]
-
-
-async def send_payload(conversation_token: UUID, payload) -> Response:
+async def send_payload(conversation_token: UUID, payload, summary: str = "") -> Response:
     connection: asyncpg.pool.PoolConnectionProxy
     async with await database.acquire() as connection:
         handful_of_ids = await connection.fetchrow(
@@ -119,7 +116,7 @@ async def send_payload(conversation_token: UUID, payload) -> Response:
         elif isinstance(payload, TextMessage):
             built_card = cards.simple_message(payload.text, payload.title, payload.title_color)
         else:
-            built_card = cards.card(payload)
+            built_card = cards.card(payload, summary)
 
         activity_id = await ti.send_to_conversation(
             handful_of_ids["conversation_teams_id"],
@@ -142,11 +139,16 @@ async def send_payload(conversation_token: UUID, payload) -> Response:
 
 
 class ConversationTokenAndMessageOfAnyType(BaseModel):
-    "conversation_token and one and only one of message, text, or card must be filled"
+    """`conversation_token` with *one and only one* of `message`, `text`, or `card` *must* be filled
+
+    `summary` will only be used for card payload as notification hint
+    """
+
     conversation_token: UUID
     message: Optional[TextMessage] = None
     text: Optional[str] = None
     card: Optional[dict[str, Any]] = None
+    summary: str = ""
 
     @model_validator(mode="after")
     def check_that_only_one_message_type_is_filled(self) -> Self:
@@ -159,8 +161,17 @@ class ConversationTokenAndMessageOfAnyType(BaseModel):
 async def post_message_of_any_type(
     post: Annotated[ConversationTokenAndMessageOfAnyType, Body()],
 ):
-    """sends text, simple or card message to the token's related conversation returning `message_id`"""
-    return await send_payload(post.conversation_token, post.message or post.text or post.card)
+    """sends text, simple or card message to the token's related conversation returning `message_id`
+
+    *one and only one* of `text`, `message` or `card` *must* be provided.
+
+    `summary` will only be used for card payload as notification hint
+    """
+    return await send_payload(
+        post.conversation_token,
+        post.message or post.text or post.card,
+        post.summary,
+    )
 
 
 @app.post("/api/v1/message/text")
@@ -185,9 +196,13 @@ async def send_simple_message(
 async def send_adaptivecard(
     conversation_token: Annotated[UUID, Body()],
     card: Annotated[dict[str, Any], Body()],
+    summary: Annotated[str, Body()] = "",
 ):
-    """sends card message to the token's related conversation returning `message_id`"""
-    return await send_payload(conversation_token, card)
+    """sends card message to the token's related conversation returning `message_id`
+
+    `summary` will be used as notification hint
+    """
+    return await send_payload(conversation_token, card, summary)
 
 
 class MessageId(BaseModel):
@@ -241,11 +256,16 @@ async def delete_message(
 
 
 class MessageIdAndMessageOfAnyType(BaseModel):
-    "message_id and one and only one of message, text, or card must be filled"
+    """`message_id` and *one and only one* of `message`, `text`, or `card` *must* be filled
+
+    `summary` will only be used for card payload as notification hint
+    """
+
     message_id: UUID
     message: Optional[TextMessage] = None
     text: Optional[str] = None
     card: Optional[dict[str, Any]] = None
+    summary: str = ""
 
     @model_validator(mode="after")
     def check_that_only_one_message_type_is_filled(self) -> Self:
@@ -258,6 +278,13 @@ class MessageIdAndMessageOfAnyType(BaseModel):
 async def send_notification(
     msg_to_patch: Annotated[MessageIdAndMessageOfAnyType, Body()],
 ):
+    """updates an activity
+
+    `message_id` with *one and only one* of `message`, `text`, or `card` *must* be filled
+
+    `summary` will not be used and is kept only for payload coherence
+    """
+
     connection: asyncpg.pool.PoolConnectionProxy
     async with await database.acquire() as connection:
         activity_details = await connection.fetchrow(
@@ -290,7 +317,7 @@ async def send_notification(
         elif isinstance(payload, TextMessage):
             built_card = cards.simple_message(payload.text, payload.title, payload.title_color)
         elif isinstance(payload, dict):
-            built_card = cards.card(payload)
+            built_card = cards.card(payload, msg_to_patch.summary)
         else:
             raise HTTPException(
                 status_code=400,

@@ -150,6 +150,7 @@ class CardHelper:
             return Activity(
                 type=ActivityTypes.message,
                 attachments=[CardFactory.adaptive_card(card=card)],
+                summary=title or text,
             )
         else:
             return Activity(
@@ -160,10 +161,12 @@ class CardHelper:
     def card(
         self,
         card: dict[str, Any],
+        summary: str = "",
     ) -> Activity:
         return Activity(
             type=ActivityTypes.message,
             attachments=[CardFactory.adaptive_card(card=card)],
+            summary=summary,
         )
 
 
