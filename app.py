@@ -68,7 +68,7 @@ app: FastAPI = FastAPI(
 #     allow_headers=["*"],  # Allows all headers
 # )
 
-ti = TeamsInterface(config.APP_ID, config.APP_PASSWORD)
+ti = TeamsInterface(config)
 
 
 @app.get("/", response_class=RedirectResponse, status_code=302)

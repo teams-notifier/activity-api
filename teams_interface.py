@@ -3,7 +3,6 @@ from botbuilder.schema import Activity
 from botbuilder.schema import ActivityTypes
 from botbuilder.schema import ChannelAccount
 from botframework.connector.aio import ConnectorClient
-from botframework.connector.auth import MicrosoftAppCredentials
 from opentelemetry import trace
 
 from config import DefaultConfig
@@ -16,13 +15,13 @@ CHANNEL_ID = "msteams"
 
 
 class TeamsInterface:
-    def __init__(self, app_id: str, app_password: str) -> None:
+    def __init__(self, config: DefaultConfig) -> None:
         self._connector = ConnectorClient(
-            MicrosoftAppCredentials(app_id, app_password),
+            config.get_credentials(),
             base_url=SERVICE_URL,
         )
         self._conv = self._connector.conversations
-        self._chanacc = ChannelAccount(id=app_id)
+        self._chanacc = ChannelAccount(id=config.APP_ID)
         self.me = self._chanacc
 
     def str_to_activity(self, activity: Activity | str) -> Activity:
