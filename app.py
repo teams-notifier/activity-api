@@ -76,6 +76,22 @@ async def root():
     return "/docs"
 
 
+class MessageId(BaseModel):
+    message_id: UUID
+
+
+class MessagePatchResponse(MessageId):
+    updated_at: str = Field(
+        description="RFC 3339 [ISO 8601 with a space instead of a T]), ex: 2024-11-14 07:20:31.320543+00:00"
+    )
+
+
+class MessageDeleteResponse(MessageId):
+    deleted_at: str = Field(
+        description="RFC 3339 [ISO 8601 with a space instead of a T]), ex: 2024-11-14 07:20:31.320543+00:00"
+    )
+
+
 class TextMessage(BaseModel):
     title: str | None = Field(None)
     title_color: TextBlock_Color | None = Field(
@@ -157,7 +173,7 @@ class ConversationTokenAndMessageOfAnyType(BaseModel):
         return self
 
 
-@app.post("/api/v1/message")
+@app.post("/api/v1/message", response_model=MessageId)
 async def post_message_of_any_type(
     post: Annotated[ConversationTokenAndMessageOfAnyType, Body()],
 ):
@@ -174,7 +190,7 @@ async def post_message_of_any_type(
     )
 
 
-@app.post("/api/v1/message/text")
+@app.post("/api/v1/message/text", response_model=MessageId)
 async def send_text_message(
     conversation_token: Annotated[UUID, Body()],
     text: Annotated[str, Body()],
@@ -183,7 +199,7 @@ async def send_text_message(
     return await send_payload(conversation_token, text)
 
 
-@app.post("/api/v1/message/simple")
+@app.post("/api/v1/message/simple", response_model=MessageId)
 async def send_simple_message(
     conversation_token: Annotated[UUID, Body()],
     message: Annotated[TextMessage, Body()],
@@ -192,7 +208,7 @@ async def send_simple_message(
     return await send_payload(conversation_token, message)
 
 
-@app.post("/api/v1/message/card")
+@app.post("/api/v1/message/card", response_model=MessageId)
 async def send_adaptivecard(
     conversation_token: Annotated[UUID, Body()],
     card: Annotated[dict[str, Any], Body()],
@@ -205,11 +221,7 @@ async def send_adaptivecard(
     return await send_payload(conversation_token, card, summary)
 
 
-class MessageId(BaseModel):
-    message_id: UUID
-
-
-@app.delete("/api/v1/message")
+@app.delete("/api/v1/message", response_model=MessageDeleteResponse)
 async def delete_message(
     message_id: Annotated[MessageId, Body()],
 ):
@@ -274,7 +286,7 @@ class MessageIdAndMessageOfAnyType(BaseModel):
         return self
 
 
-@app.patch("/api/v1/message")
+@app.patch("/api/v1/message", response_model=MessagePatchResponse)
 async def send_notification(
     msg_to_patch: Annotated[MessageIdAndMessageOfAnyType, Body()],
 ):
