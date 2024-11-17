@@ -6,7 +6,7 @@ aiohttp
 asyncpg
 httpx
 blibs
-fastapi
+fastapi[standard]
 uvicorn
 asgi-logger
 opentelemetry-distro

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -10,6 +11,7 @@ from uuid import UUID
 import asyncpg
 import blibs
 from asgi_logger.middleware import AccessLoggerMiddleware
+from botbuilder.schema import ErrorResponseException
 from fastapi import Body
 from fastapi import FastAPI
 from fastapi import HTTPException
@@ -134,10 +136,20 @@ async def send_payload(conversation_token: UUID, payload, summary: str = "") -> 
         else:
             built_card = cards.card(payload, summary)
 
-        activity_id = await ti.send_to_conversation(
-            handful_of_ids["conversation_teams_id"],
-            built_card,
-        )
+        try:
+            activity_id = await ti.send_to_conversation(
+                handful_of_ids["conversation_teams_id"],
+                built_card,
+            )
+        except ErrorResponseException as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "response": json.loads(exc.response.content.decode("utf-8")),
+                    "args": exc.args,
+                    "message": exc.message,
+                },
+            )
 
         result = await connection.fetchrow(
             """
@@ -287,7 +299,7 @@ class MessageIdAndMessageOfAnyType(BaseModel):
 
 
 @app.patch("/api/v1/message", response_model=MessagePatchResponse)
-async def send_notification(
+async def patch_activity(
     msg_to_patch: Annotated[MessageIdAndMessageOfAnyType, Body()],
 ):
     """updates an activity
@@ -336,11 +348,21 @@ async def send_notification(
                 detail="invalid payload, neither a text, a message nor a card",
             )
 
-        await ti.update_activity(
-            conversation_teams_id=activity_details["conversation_teams_id"],
-            activity_id=activity_details["activity_id"],
-            activity=built_card,
-        )
+        try:
+            await ti.update_activity(
+                conversation_teams_id=activity_details["conversation_teams_id"],
+                activity_id=activity_details["activity_id"],
+                activity=built_card,
+            )
+        except ErrorResponseException as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "response": json.loads(exc.response.content.decode("utf-8")),
+                    "args": exc.args,
+                    "message": exc.message,
+                },
+            )
 
         result = await connection.fetchrow(
             """
