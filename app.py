@@ -52,6 +52,7 @@ async def lifespan(app: FastAPI):
 
 app: FastAPI = FastAPI(
     title="Teams Notifier activity-api",
+    version=os.environ.get("VERSION", "v0.0.0-dev"),
     lifespan=lifespan,
     middleware=[
         Middleware(
