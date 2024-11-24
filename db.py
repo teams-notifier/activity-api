@@ -36,6 +36,10 @@ class DatabaseLifecycleHandler:
             connection_class=NoResetConnection,
         )
 
+        # Simple check at startup, will validate database resolution and creds
+        async with await self.acquire() as connection:
+            await connection.fetchval("SELECT 1")
+
     async def disconnect(self):
         if self._pool:
             await self._pool.close()
