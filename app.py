@@ -382,6 +382,18 @@ async def patch_activity(
     )
 
 
+@app.get("/healthz", include_in_schema=False)
+async def healthcheck():
+    try:
+        connection: asyncpg.pool.PoolConnectionProxy
+        async with await database.acquire() as connection:
+            result = await connection.fetchval("SELECT true FROM conversation_reference")
+            return {"ok": result}
+    except Exception as e:
+        logger.exception(f"health check failed with {type(e)}: {e}")
+        raise HTTPException(status_code=500, detail=f"{type(e)}: {e}")
+
+
 if __name__ == "__main__":
     import uvicorn
 
