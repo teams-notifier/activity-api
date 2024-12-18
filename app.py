@@ -26,6 +26,7 @@ from pydantic import model_validator
 from typing_extensions import Self
 
 from card_helper import cards
+from card_helper import Container_ContainerStyle
 from card_helper import TextBlock_Color as TextBlock_Color
 from config import DefaultConfig
 from db import database
@@ -109,6 +110,12 @@ class TextMessage(BaseModel):
         " and https://commonmark.org/help/ "
     )
 
+    style: Container_ContainerStyle | None = Field(None, description="text container style")
+    bleed: bool | None = Field(None, description="set the text container to bleed")
+    title_style: Container_ContainerStyle | None = Field(None, description="title container style")
+    title_bleed: bool | None = Field(None, description="set the title container to bleed")
+    summary: str | None = Field(None, description="summary")
+
 
 async def send_payload(conversation_token: UUID, payload, summary: str = "") -> Response:
     connection: asyncpg.pool.PoolConnectionProxy
@@ -133,7 +140,15 @@ async def send_payload(conversation_token: UUID, payload, summary: str = "") -> 
         if isinstance(payload, str):
             built_card = cards.simple_message(payload)
         elif isinstance(payload, TextMessage):
-            built_card = cards.simple_message(payload.text, payload.title, payload.title_color)
+            built_card = cards.simple_message(
+                payload.text,
+                style=payload.style,
+                bleed=payload.bleed,
+                title=payload.title,
+                title_color=payload.title_color,
+                title_style=payload.title_style,
+                title_bleed=payload.title_bleed,
+            )
         else:
             built_card = cards.card(payload, summary)
 
@@ -170,7 +185,7 @@ async def send_payload(conversation_token: UUID, payload, summary: str = "") -> 
 class ConversationTokenAndMessageOfAnyType(BaseModel):
     """`conversation_token` with *one and only one* of `message`, `text`, or `card` *must* be filled
 
-    `summary` will only be used for card payload as notification hint
+    `summary` will only be used for `card` payload as notification hint
     """
 
     conversation_token: UUID
@@ -194,7 +209,7 @@ async def post_message_of_any_type(
 
     *one and only one* of `text`, `message` or `card` *must* be provided.
 
-    `summary` will only be used for card payload as notification hint
+    `summary` will only be used for `card` payload as notification hint
     """
     return await send_payload(
         post.conversation_token,
@@ -217,7 +232,10 @@ async def send_simple_message(
     conversation_token: Annotated[UUID, Body()],
     message: Annotated[TextMessage, Body()],
 ):
-    """sends simple message to the token's related conversation returning `message_id`"""
+    """sends simple message to the token's related conversation returning `message_id`
+
+    if `summary` is not provided then the title or, if missing, the message will be used as notification hint
+    """
     return await send_payload(conversation_token, message)
 
 
@@ -283,7 +301,7 @@ async def delete_message(
 class MessageIdAndMessageOfAnyType(BaseModel):
     """`message_id` and *one and only one* of `message`, `text`, or `card` *must* be filled
 
-    `summary` will only be used for card payload as notification hint
+    `summary` will only be used for `card` payload as notification hint
     """
 
     message_id: UUID
@@ -340,7 +358,15 @@ async def patch_activity(
         if isinstance(payload, str):
             built_card = cards.simple_message(payload)
         elif isinstance(payload, TextMessage):
-            built_card = cards.simple_message(payload.text, payload.title, payload.title_color)
+            built_card = cards.simple_message(
+                payload.text,
+                style=payload.style,
+                bleed=payload.bleed,
+                title=payload.title,
+                title_color=payload.title_color,
+                title_style=payload.title_style,
+                title_bleed=payload.title_bleed,
+            )
         elif isinstance(payload, dict):
             built_card = cards.card(payload, msg_to_patch.summary)
         else:

@@ -55,6 +55,15 @@ class TextBlock_Spacing(Enum):
     PADDING = "padding"
 
 
+class Container_ContainerStyle(Enum):
+    DEFAULT = "default"
+    EMPHASIS = "emphasis"
+    GOOD = "good"
+    ATTENTION = "attention"
+    WARNING = "warning"
+    ACCENT = "accent"
+
+
 _BASIC_CARD = {
     "type": "AdaptiveCard",
     "$schema": "https://adaptivecards.io/schemas/adaptive-card.json",
@@ -125,32 +134,79 @@ class TextBlock(ACBuildable):
         return json.dumps(self.build())
 
 
+class Container(ACBuildable):
+    def __init__(
+        self,
+        style: Optional[Container_ContainerStyle] = None,
+        bleed: Optional[bool] = None,
+        items: list[ACBuildable] | None = None,
+    ) -> None:
+        if items is None:
+            items = []
+        self._items = items
+        self._item: dict[str, Any] = {"type": "Container"}
+        if style is not None:
+            self._item["style"] = style.value
+        if bleed is not None:
+            self._item["bleed"] = bleed
+
+    def build(self) -> dict[str, Any]:
+        result = self._item.copy()
+        result["items"] = [element.build() for element in self._items]
+        return result
+
+    def __str__(self) -> str:
+        return json.dumps(self.build())
+
+
 class CardHelper:
 
     def simple_message(
         self,
         text: str,
+        *,
+        style: Container_ContainerStyle | None = None,
+        bleed: bool | None = None,
         title: str | None = None,
         title_color: TextBlock_Color | None = None,
+        title_style: Container_ContainerStyle | None = None,
+        title_bleed: bool | None = None,
+        summary: str | None = None,
     ) -> Activity:
         msg = BaseCardBuilder()
-        if title:
-            msg.add(
-                TextBlock(
-                    title,
-                    style=TextBlock_Style.HEADING,
-                    color=title_color,
-                    size=TextBlock_FontSize.LARGE,
-                    weight=TextBlock_FontWeight.BOLDER,
+        if title_style is None:
+            title_style = Container_ContainerStyle.DEFAULT
+        if title or style or bleed:
+            if title:
+                msg.add(
+                    Container(
+                        bleed=title_bleed,
+                        style=title_style,
+                        items=[
+                            TextBlock(
+                                title,
+                                style=TextBlock_Style.HEADING,
+                                color=title_color,
+                                weight=TextBlock_FontWeight.BOLDER,
+                            )
+                        ],
+                    )
                 )
+
+            if style is None:
+                style = Container_ContainerStyle.DEFAULT
+            text_element = Container(
+                style=style,
+                bleed=bleed,
+                items=[TextBlock(text)],
             )
-            msg.add(TextBlock(text))
+            msg.add(text_element)
             card = msg.build()
             print(card)
             return Activity(
                 type=ActivityTypes.message,
                 attachments=[CardFactory.adaptive_card(card=card)],
-                summary=title or text,
+                summary=summary or title or text,
             )
         else:
             return Activity(
