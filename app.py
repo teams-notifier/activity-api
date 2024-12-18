@@ -46,6 +46,7 @@ logging.getLogger("msal").setLevel(logging.ERROR)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("starting app version %s", app.version)
     await database.connect()
     yield
     await database.disconnect()
