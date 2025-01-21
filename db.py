@@ -4,7 +4,8 @@ import logging
 
 import asyncpg.connect_utils
 
-import config
+from config import config
+from config import DefaultConfig
 
 log = logging.getLogger(__name__)
 
@@ -24,16 +25,21 @@ class NoResetConnection(asyncpg.connection.Connection):
 
 
 class DatabaseLifecycleHandler:
-    def __init__(self, dsn: str):
+    def __init__(
+        self,
+        conf: DefaultConfig,
+    ):
         self._pool: asyncpg.Pool | None = None
-        self.dsn = dsn
+        self._config: DefaultConfig = conf
 
     async def connect(self):
         log.debug("connecting to database")
         self._pool = await asyncpg.create_pool(
-            dsn=self.dsn,
+            dsn=self._config.DATABASE_URL,
             server_settings={"application_name": "notiteams-activity-api"},
             connection_class=NoResetConnection,
+            min_size=self._config.DATABASE_POOL_MIN_SIZE,
+            max_size=self._config.DATABASE_POOL_MAX_SIZE,
         )
 
         # Simple check at startup, will validate database resolution and creds
@@ -49,4 +55,4 @@ class DatabaseLifecycleHandler:
         return self._pool.acquire()
 
 
-database = DatabaseLifecycleHandler(config.DefaultConfig.DATABASE_URL)
+database = DatabaseLifecycleHandler(config)

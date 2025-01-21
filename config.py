@@ -13,6 +13,8 @@ from botframework.connector.auth import MicrosoftAppCredentials
 dotenv.load_dotenv()
 """ Bot Configuration """
 
+__all__ = ["DefaultConfig", "config"]
+
 
 class DefaultConfig:
     """Bot Configuration"""
@@ -25,6 +27,8 @@ class DefaultConfig:
     APP_TYPE = os.environ.get("MICROSOFT_APP_TYPE", "MultiTenant")
     APP_TENANTID = os.environ.get("MICROSOFT_APP_TENANT_ID", "")
     DATABASE_URL = os.environ.get("DATABASE_URL", "")
+    DATABASE_POOL_MIN_SIZE = int(os.environ.get("DATABASE_POOL_MIN_SIZE", "1"))
+    DATABASE_POOL_MAX_SIZE = int(os.environ.get("DATABASE_POOL_MAX_SIZE", "10"))
 
     def get_credentials(self) -> AppCredentials:
         if self.APP_PASSWORD:
@@ -49,3 +53,6 @@ class DefaultConfig:
             certificate_thumbprint=cert_thumbprint,
             certificate_private_key=privkey,
         )
+
+
+config = DefaultConfig()
