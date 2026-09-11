@@ -44,9 +44,12 @@ Interactive documentation available at:
 All POST routes require a `conversation_token` (obtained from MS Teams bot interaction) and returns a `message_id`:
 ```json
 {
-  "message_id": "uuid-v7"
+  "message_id": "uuid"
 }
 ```
+
+The server generates a v7 UUID unless the caller supplied its own id (see below), in which case the
+answer echoes that one back.
 
 #### Message options
 
@@ -84,6 +87,28 @@ All POST routes require a `conversation_token` (obtained from MS Teams bot inter
     [... one of the previous payload...]
 }
 ```
+
+#### Caller-chosen `message_id`
+
+`POST /api/v1/message` also accepts an optional `message_id`, which **must be a random UUID**:
+
+```json
+{
+    "conversation_token": "conversation_token (uuid)",
+    "message_id": "random uuid",
+    [... one of the previous payload...]
+}
+```
+
+A caller that writes the id down before sending keeps a usable handle even when it never sees the
+answer, so a timed out call no longer strands a message it can neither update nor delete.
+
+Replaying the same `message_id` returns `200` with that id and sends nothing. Replaying one that
+belongs to another conversation returns `409`: an id may only be reused inside the conversation
+that owns it, otherwise a caller could squat an id and have it handed to someone else. Replaying
+the id of a deleted message returns `410`, since the handle it would give back is already spent.
+
+Concurrent replays of one id are serialised, so only one of them reaches Teams.
 
 ### Update a message
 

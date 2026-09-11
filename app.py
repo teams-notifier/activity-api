@@ -118,7 +118,68 @@ class TextMessage(BaseModel):
     summary: str | None = Field(None, description="summary")
 
 
-async def send_payload(conversation_token: UUID, payload, summary: str = "") -> Response:
+async def _send_and_record(
+    connection: asyncpg.pool.PoolConnectionProxy,
+    handful_of_ids: asyncpg.Record,
+    payload,
+    summary: str,
+    message_id: UUID | None,
+) -> Response:
+    built_card = None
+    if isinstance(payload, str):
+        built_card = cards.simple_message(payload)
+    elif isinstance(payload, TextMessage):
+        built_card = cards.simple_message(
+            payload.text,
+            style=payload.style,
+            bleed=payload.bleed,
+            title=payload.title,
+            title_color=payload.title_color,
+            title_style=payload.title_style,
+            title_bleed=payload.title_bleed,
+        )
+    else:
+        built_card = cards.card(payload, summary)
+
+    try:
+        activity_id = await ti.send_to_conversation(
+            handful_of_ids["conversation_teams_id"],
+            built_card,
+        )
+    except ErrorResponseException as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "response": json.loads(exc.response.content.decode("utf-8")),
+                "args": exc.args,
+                "message": exc.message,
+            },
+        )
+
+    result = await connection.fetchrow(
+        """
+        INSERT INTO message (
+            message_id, conversation_token_id, conversation_reference_id, activity_id
+        )
+        VALUES (COALESCE($1, public.uuid_generate_v7()), $2, $3, $4) RETURNING message_id
+        """,
+        message_id,
+        handful_of_ids["conversation_token_id"],
+        handful_of_ids["conversation_reference_id"],
+        activity_id,
+    )
+
+    return JSONResponse(
+        status_code=status.HTTP_201_CREATED, content={"message_id": str(result["message_id"])}
+    )
+
+
+async def send_payload(
+    conversation_token: UUID,
+    payload,
+    summary: str = "",
+    message_id: UUID | None = None,
+) -> Response:
     connection: asyncpg.pool.PoolConnectionProxy
     async with await database.acquire() as connection:
         handful_of_ids = await connection.fetchrow(
@@ -137,50 +198,42 @@ async def send_payload(conversation_token: UUID, payload, summary: str = "") -> 
                 detail="invalid conversation_token",
             )
 
-        built_card = None
-        if isinstance(payload, str):
-            built_card = cards.simple_message(payload)
-        elif isinstance(payload, TextMessage):
-            built_card = cards.simple_message(
-                payload.text,
-                style=payload.style,
-                bleed=payload.bleed,
-                title=payload.title,
-                title_color=payload.title_color,
-                title_style=payload.title_style,
-                title_bleed=payload.title_bleed,
-            )
-        else:
-            built_card = cards.card(payload, summary)
+        if message_id is None:
+            return await _send_and_record(connection, handful_of_ids, payload, summary, None)
 
-        try:
-            activity_id = await ti.send_to_conversation(
-                handful_of_ids["conversation_teams_id"],
-                built_card,
-            )
-        except ErrorResponseException as exc:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "response": json.loads(exc.response.content.decode("utf-8")),
-                    "args": exc.args,
-                    "message": exc.message,
-                },
+        # The lock spans the lookup, the Teams call and the insert, so the transaction stays open
+        # for as long as Teams takes to answer. That is the price of the guarantee: without it
+        # two concurrent replays of one id both find no row and Teams gets two cards.
+        # It must be xact-scoped, not session-scoped: this pool disables asyncpg's reset query
+        # (see NoResetConnection in db.py), so a session lock would outlive the request forever.
+        async with connection.transaction():
+            await connection.execute(
+                "SELECT pg_advisory_xact_lock($1)",
+                int.from_bytes(message_id.bytes[:8], "big", signed=True),
             )
 
-        result = await connection.fetchrow(
-            """
-            INSERT INTO message (conversation_token_id, conversation_reference_id, activity_id)
-            VALUES ($1, $2, $3) RETURNING message_id
-            """,
-            handful_of_ids["conversation_token_id"],
-            handful_of_ids["conversation_reference_id"],
-            activity_id,
-        )
+            existing = await connection.fetchrow(
+                "SELECT conversation_token_id, deleted_at FROM message WHERE message_id = $1",
+                message_id,
+            )
+            if existing is not None:
+                # A caller may only reuse an id inside the conversation that owns it. Without
+                # this check, anyone able to post could squat an id and have it handed back to
+                # another caller, who would then patch and delete the squatter's message.
+                if existing["conversation_token_id"] != handful_of_ids["conversation_token_id"]:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="message_id already in use",
+                    )
+                if existing["deleted_at"] is not None:
+                    raise HTTPException(
+                        status_code=410,
+                        detail="message_id already deleted",
+                    )
+                logger.info("message %s already sent, replaying its id", message_id)
+                return JSONResponse(status_code=status.HTTP_200_OK, content={"message_id": str(message_id)})
 
-    return JSONResponse(
-        status_code=status.HTTP_201_CREATED, content={"message_id": str(result["message_id"])}
-    )
+            return await _send_and_record(connection, handful_of_ids, payload, summary, message_id)
 
 
 class ConversationTokenAndMessageOfAnyType(BaseModel):
@@ -194,6 +247,12 @@ class ConversationTokenAndMessageOfAnyType(BaseModel):
     text: Optional[str] = None
     card: Optional[dict[str, Any]] = None
     summary: str = ""
+    message_id: UUID | None = Field(
+        None,
+        description="caller-chosen id for the message, which MUST be a random UUID."
+        " Lets the caller keep a usable handle on a message whose creation call it never saw"
+        " the answer to. Omit it to let the server generate one.",
+    )
 
     @model_validator(mode="after")
     def check_that_only_one_message_type_is_filled(self) -> Self:
@@ -211,11 +270,15 @@ async def post_message_of_any_type(
     *one and only one* of `text`, `message` or `card` *must* be provided.
 
     `summary` will only be used for `card` payload as notification hint
+
+    a caller-chosen `message_id` may be provided; replaying the same one returns `200` with that
+    id instead of sending a second message. It must be a random UUID.
     """
     return await send_payload(
         post.conversation_token,
         post.message or post.text or post.card,
         post.summary,
+        post.message_id,
     )
 
 
