@@ -29,6 +29,7 @@ class DefaultConfig:
     DATABASE_URL = os.environ.get("DATABASE_URL", "")
     DATABASE_POOL_MIN_SIZE = int(os.environ.get("DATABASE_POOL_MIN_SIZE", "1"))
     DATABASE_POOL_MAX_SIZE = int(os.environ.get("DATABASE_POOL_MAX_SIZE", "10"))
+    TEAMS_SERVICE_URL = os.environ.get("TEAMS_SERVICE_URL", "")
 
     def get_credentials(self) -> AppCredentials:
         if self.APP_PASSWORD:

@@ -27,6 +27,18 @@ Environment variables (can be set via `.env` file):
 - `MICROSOFT_APP_CERTIFICATE`: PEM certificate (Base64 encoded)
 - `MICROSOFT_APP_PRIVATEKEY`: PEM private key (Base64 encoded)
 
+### Teams Settings
+- `TEAMS_SERVICE_URL`: optional. When set, every Teams call goes to this service URL, whatever the
+  conversation's own region says — use it to force a region for a test, or to roll back to a
+  previous one without a deploy (for example `https://smba.trafficmanager.net/amer/`). Leave it
+  unset in normal operation: each conversation is then addressed at the `serviceUrl` Teams sent
+  when the bot joined it, as Microsoft requires, falling back to the documented global endpoint
+  `https://smba.trafficmanager.net/teams/` only for a conversation that has none stored.
+  Whatever its source, a URL is only used if it is `https` on one of Microsoft's documented Teams
+  hosts (`smba.trafficmanager.net` and the GCC / GCC High / DoD `smba.infra.*` hosts); anything else
+  is refused with a warning and the global endpoint is used instead, since the bot's bearer token
+  travels with every call.
+
 ### Database Settings
 - `DATABASE_URL`: PostgreSQL connection string
   Format: `postgresql://{USER}:{PASSWORD}@{HOST}/{DATABASE}`

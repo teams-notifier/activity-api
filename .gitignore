@@ -4,3 +4,4 @@ __pycache__
 misc
 .vscode
 .pytest_cache
+.coverage
