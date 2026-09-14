@@ -6,6 +6,7 @@ holds a usable handle, so replaying an id must be safe and must never post a sec
 """
 import json
 import uuid
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -15,10 +16,13 @@ from app import send_payload
 
 CONVERSATION_TOKEN_ID = 42
 
+HOME_REGION = "https://smba.trafficmanager.net/fr/8445aa6a-b1ff-4969-8fb4-490c952d4953/"
+
 TOKEN_ROW = {
     "conversation_teams_id": "19:abc@thread.v2",
     "conversation_reference_id": 7,
     "conversation_token_id": CONVERSATION_TOKEN_ID,
+    "service_url": HOME_REGION,
 }
 
 
@@ -33,6 +37,8 @@ async def test_server_generates_the_id_when_none_is_supplied(connection, teams):
 
     assert response.status_code == 201
     assert teams.await_count == 1
+    # The conversation's own home region travels with the call, never a hardcoded one.
+    assert teams.await_args.kwargs["service_url"] == HOME_REGION
     connection.transaction.assert_not_called()
     insert_sql, supplied_id, *_ = connection.fetchrow.call_args[0]
     assert "INSERT INTO message" in insert_sql
@@ -106,3 +112,52 @@ async def test_unknown_conversation_token_is_refused(connection, teams):
 
     assert exc.value.status_code == 400
     teams.assert_not_awaited()
+
+
+async def test_update_is_addressed_at_the_stored_home_region(connection, monkeypatch):
+    from app import MessageIdAndMessageOfAnyType
+    from app import patch_activity
+    import app as app_module
+
+    update = AsyncMock(return_value="activity-id-1")
+    monkeypatch.setattr(app_module.ti, "update_activity", update)
+    message_id = uuid.uuid4()
+    connection.fetchrow.side_effect = [
+        {
+            "conversation_teams_id": TOKEN_ROW["conversation_teams_id"],
+            "activity_id": "activity-id-1",
+            "deleted_at": None,
+            "service_url": HOME_REGION,
+        },
+        {"message_id": message_id, "updated_at": "2026-09-14"},
+    ]
+
+    response = await patch_activity(MessageIdAndMessageOfAnyType(message_id=message_id, text="edited"))
+
+    assert response.status_code == 201
+    assert update.await_args_list[0].kwargs["service_url"] == HOME_REGION
+
+
+async def test_delete_is_addressed_at_the_stored_home_region(connection, monkeypatch):
+    from app import MessageId
+    from app import delete_message
+    import app as app_module
+
+    delete = AsyncMock()
+    monkeypatch.setattr(app_module.ti, "delete_activity", delete)
+    message_id = uuid.uuid4()
+    connection.fetchrow.side_effect = [
+        {
+            "message_id": message_id,
+            "conversation_teams_id": TOKEN_ROW["conversation_teams_id"],
+            "activity_id": "activity-id-1",
+            "deleted_at": None,
+            "service_url": HOME_REGION,
+        },
+        {"message_id": message_id, "deleted_at": "2026-09-14"},
+    ]
+
+    response = await delete_message(MessageId(message_id=message_id))
+
+    assert response.status_code == 200
+    assert delete.await_args_list[0].kwargs["service_url"] == HOME_REGION

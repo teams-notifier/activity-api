@@ -145,6 +145,7 @@ async def _send_and_record(
         activity_id = await ti.send_to_conversation(
             handful_of_ids["conversation_teams_id"],
             built_card,
+            service_url=handful_of_ids["service_url"],
         )
     except ErrorResponseException as exc:
         raise HTTPException(
@@ -185,6 +186,7 @@ async def send_payload(
         handful_of_ids = await connection.fetchrow(
             """
             SELECT  conversation_teams_id,
+                    cr.conversation_reference->>'service_url' AS service_url,
                     cr.conversation_reference_id AS conversation_reference_id,
                     ct.conversation_token_id AS conversation_token_id
             FROM conversation_token ct
@@ -324,9 +326,10 @@ async def delete_message(
     async with await database.acquire() as connection:
         message = await connection.fetchrow(
             """
-            SELECT message_id, conversation_teams_id, activity_id, deleted_at
+            SELECT message_id, conversation_teams_id, activity_id, deleted_at,
+                   cr.conversation_reference->>'service_url' AS service_url
             FROM message
-            JOIN conversation_reference USING (conversation_reference_id)
+            JOIN conversation_reference cr USING (conversation_reference_id)
             WHERE message_id = $1
             """,
             message_id.message_id,
@@ -346,6 +349,7 @@ async def delete_message(
         await ti.delete_activity(
             message["conversation_teams_id"],
             message["activity_id"],
+            service_url=message["service_url"],
         )
 
         result = await connection.fetchrow(
@@ -398,7 +402,8 @@ async def patch_activity(
             """
             SELECT  conversation_teams_id,
                     activity_id,
-                    deleted_at
+                    deleted_at,
+                    cr.conversation_reference->>'service_url' AS service_url
             FROM message
             JOIN conversation_reference cr USING (conversation_reference_id)
             WHERE message_id = $1
@@ -444,6 +449,7 @@ async def patch_activity(
                 conversation_teams_id=activity_details["conversation_teams_id"],
                 activity_id=activity_details["activity_id"],
                 activity=built_card,
+                service_url=activity_details["service_url"],
             )
         except ErrorResponseException as exc:
             raise HTTPException(
